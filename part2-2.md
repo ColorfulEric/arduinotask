@@ -123,6 +123,9 @@ void handleSingleCmd(char c)
 {
     switch(c)
     {
+        case 'I':
+            servoInit();
+            break;
         case 'O':
             OpenClaw();
             break;
@@ -134,6 +137,15 @@ void handleSingleCmd(char c)
             break;
         case 'L':
             DSDadd();
+            break;
+        case 'A':
+            pickA();
+            break;
+        case 'B':
+            pickB();
+            break;
+        case 'C':
+            pickC();
             break;
         default:
             Serial.println("+Warning:unknown command!");
@@ -198,5 +210,20 @@ void DSDadd()
         Serial.print("+Warning:too slow! your current speed is:");
         Serial.println(DSD);
     }
+}
+
+void servoInit()
+{
+    base.write(90);
+    lArm.write(90);
+    rArm.write(90);
+    claw.write(clawMax);
+
+    delay(100);
+}
+
+void pickA()
+{
+    
 }
 ```
