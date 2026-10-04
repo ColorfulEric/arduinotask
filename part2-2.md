@@ -52,12 +52,12 @@ void loop()
         if(serialCmd.length() == 0) return;
   
         if(serialCmd.length() == 1) handleSingleCmd(serialCmd[0]);
-        else if(serialCmd.indexOf('x') != -1 && serialCmd.indexOf('y') != -1 && serialCmd.indexOf('z') != -1 )
+        else if(serialCmd.indexOf('x') != -1 || serialCmd.indexOf('y') || -1 && serialCmd.indexOf('z') || -1 )
         {
             //x,y,z分别对应base,lArm,rArm
-            int x = getValue(serialCmd, 'x');
-            int y = getValue(serialCmd, 'y');
-            int z = getValue(serialCmd, 'z');
+            int x = (serialCmd.indexOf('x') != -1) ? getValue(serialCmd, 'x') : base.read();
+            int y = (serialCmd.indexOf('y') != -1) ? getValue(serialCmd, 'y') : lArm.read();
+            int z = (serialCmd.indexOf('z') != -1) ? getValue(serialCmd, 'z') : rArm.read();
 
             if(isLegal(x, y, z)) servoCmd(x,y,z);
             else Serial.println("+Warning: Your Command is Out Of Limits!");
