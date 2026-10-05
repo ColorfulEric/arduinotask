@@ -12,38 +12,55 @@ const int lArmMax = 120;
 const int clawMin = 25;
 const int clawMax = 100;
 
+const int basePin = A0;
+const int lArmPin = A1;
+const int rArmPin = A2;
+const int clawPin = A3;
+
+const int MAX_RECORD = 500;
+byte baseRecord[MAX_RECORD];
+byte lArmRecord[MAX_RECORD];
+byte rArmRecord[MAX_RECORD];
+byte clawRecord[MAX_RECORD];
+int recordIndex = 0;
+
+enum State {IDLE,RECORDING,PLAYING};
+State state = IDLE;
+
 int DSD = 16;
 
+void updateJoystick();
 void servoCmd(int x, int y, int z);
 void moveServo(Servo &servoName, int fromPos, int toPos);
-int getValue(String data, char key);
-bool isLegal(int x, int y, int z);
 void handleSingleCmd(char c);
 void OpenClaw();
 void CloseClaw();
 void DSDadd();
 void DSDsub();
+void startRecord();
+void stopRecord();
+void playRecord();
+void servoInit();
+bool isLegal(int x, int y, int z);
+int getValue(String data, char key);
 
 void setup()
 {
-    claw.attach(9);
-    base.attach(3);
-    lArm.attach(5);
-    rArm.attach(6);
+    base.attach(9,500,2500);
+    lArm.attach(8,500,2500);
+    rArm.attach(7,500,2500);
+    claw.attach(6,500,2500);
 
-    claw.write(90);
-    base.write(90);
-    lArm.write(90);
-    rArm.write(90);
-
-    delay(100);
+    servoInit();
 
     Serial.begin(9600);
-    Serial.println("please input data:");
+    Serial.println("Please Input Data: ");
 }
 
 void loop()
 {
+    if(state != PLAYING) updateJoystick();
+
     if(Serial.available()>0)
     {
         String serialCmd = Serial.readStringUntil('\n');
@@ -52,7 +69,8 @@ void loop()
         if(serialCmd.length() == 0) return;
   
         if(serialCmd.length() == 1) handleSingleCmd(serialCmd[0]);
-        else if(serialCmd.indexOf('x') != -1 || serialCmd.indexOf('y') || -1 && serialCmd.indexOf('z') || -1 )
+        
+        if(state == IDLE&&(serialCmd.indexOf('x') != -1 || serialCmd.indexOf('y') || -1 && serialCmd.indexOf('z') || -1 ))
         {
             //x,y,z分别对应base,lArm,rArm
             int x = (serialCmd.indexOf('x') != -1) ? getValue(serialCmd, 'x') : base.read();
@@ -64,6 +82,35 @@ void loop()
         }
         else Serial.println("+Warning: Unknown Command!");
     }
+}
+
+void updateJoystick()
+{
+    int x = map(analogRead(basePin),0,1023,0,180);
+    int y = map(analogRead(lARmPin),0,1023,0,180);
+    int z = map(analogRead(rArmPin),0,1023,0,180);
+    int g = map(analogRead(clawPin),0,1023,0,180);
+
+    x = constrain(x,baseMin,baseMax);
+    y = constrain(y,lArmMin,lArmMax);
+    z = constrain(z,rArmMin,rArmMax);
+    g = constrain(g,clawMin,clawMax);
+
+    base.write(x);
+    lArm.write(y);
+    rArm.write(z);
+    claw.write(g);
+
+    base.wriet(state == RECORDING && recordIndex < MAX_RECORD)
+    {
+        baseRecord[recordIndex] = (byte)x;
+        lArmRecord[recordIndex] = (byte)y;
+        rArmRecord[recordIndex] = (byte)z;
+        clawRecord[recordIndex] = (byte)g;
+        recordIndex++;
+    }
+
+    delay(50);
 }
 
 void servoCmd(int x, int y, int z)
@@ -121,6 +168,22 @@ bool isLegal(int x, int y, int z)
 
 void handleSingleCmd(char c)
 {
+    if(state == PLAYING)
+    {
+        if(c == 'I')
+        {
+            state = IDLE;
+            servoInit();
+        }
+        return;
+    }
+
+    if(state == RECORDING)
+    {
+        if(c == 'R') stopRecord();
+        return;
+    }
+
     switch(c)
     {
         case 'I':
@@ -138,42 +201,65 @@ void handleSingleCmd(char c)
         case 'L':
             DSDadd();
             break;
-        case 'A':
-            pickA();
+        case 'R':
+            startRecord();
             break;
-        case 'B':
-            pickB();
-            break;
-        case 'C':
-            pickC();
+        case 'P':
+            playRecord();
             break;
         default:
             Serial.println("+Warning:unknown command!");
+            break;
     }
+}
+
+void startRecord()
+{
+    state = RECORDING;
+    recordIndex = 0;
+    Serial.println("开始录制...");
+}
+
+void stopRecord()
+{
+    state = IDLE;
+    Serial.print("录制结束，共 ");
+    Serial.print(recordIndex);
+    Serial.println(" 个数据点");
+}
+
+void playRecord()
+{
+    if(recordIndex = 0)
+    {
+        Serial.println("+Warning:No Recording Data!");
+        return;
+    }
+
+    state = PLAYING;
+    Serial.println("Start Recording...");
+
+    for(int i = 0;i<recordIndex;i++)
+    {
+        base.write(baseRecord[i]);
+        lArm.write(lArmRecord[i]);
+        rArm.write(rArmRecord[i]);
+        claw.write(clawRecord[i]);
+        delay(50);
+    }
+
+    state = IDLE;
+    Serial.println("End Recording.");
 }
 
 void OpenClaw()
 {
-    int fromPos = claw.read();
-    int toPos = clawMax;
-
-    for(int i = fromPos;i <= toPos;i++)
-    {
-        claw.write(i);
-        delay(DSD);
-    }
+    moveServo(claw,claw.read(),clawMax);
 }
 
 void CloseClaw()
 {
-    int fromPos = claw.read();
-    int toPos = clawMin;
-
-    for(int i = fromPos;i >= toPos;i--)
-    {
-        claw.write(i);
-        delay(DSD);
-    }
+    moveServo(claw,claw.read(),clawMin);
 }
 
 void DSDsub()
@@ -214,16 +300,12 @@ void DSDadd()
 
 void servoInit()
 {
-    base.write(90);
-    lArm.write(90);
-    rArm.write(90);
+    base.write(89);
+    lArm.write(91);
+    rArm.write(91);
     claw.write(clawMax);
 
     delay(100);
 }
 
-void pickA()
-{
-    
-}
 ```
