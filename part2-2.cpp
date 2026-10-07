@@ -1,57 +1,82 @@
 ```cpp
 #include<Servo.h>
 
-Servo claw, base, lArm, rArm;
+Servo claw, base, lArm, rArm;//创建对象
 
+//限制角度
 const int baseMin = 0;
 const int baseMax = 180; 
-const int rArmMin = 45;
-const int rArmMax = 180; 
+const int rArmMin = 90;
+const int rArmMax = 160; 
 const int lArmMin = 35;
 const int lArmMax = 120;
-const int clawMin = 25;
+const int clawMin = 0;
 const int clawMax = 100;
 
+//初始化引脚
 const int basePin = A0;
 const int lArmPin = A1;
 const int rArmPin = A2;
 const int clawPin = A3;
 
-const int MAX_RECORD = 500;
+//限制最大录制时长
+const int MAX_RECORD = 200;
 byte baseRecord[MAX_RECORD];
 byte lArmRecord[MAX_RECORD];
 byte rArmRecord[MAX_RECORD];
 byte clawRecord[MAX_RECORD];
 int recordIndex = 0;
 
+//限制系统状态：空闲、录制、播放
 enum State {IDLE,RECORDING,PLAYING};
+//初始化状态
 State state = IDLE;
 
-int DSD = 16;
+//摇杆中值
+const int JOY_CENTER = 512;
+//摇杆死区
+const int JOY_DEADZONE = 50;//死区，防止抖动
 
-void updateJoystick();
-void servoCmd(int x, int y, int z);
-void moveServo(Servo &servoName, int fromPos, int toPos);
-void handleSingleCmd(char c);
-void OpenClaw();
-void CloseClaw();
-void DSDadd();
-void DSDsub();
-void startRecord();
-void stopRecord();
-void playRecord();
-void servoInit();
-bool isLegal(int x, int y, int z);
-int getValue(String data, char key);
+//每个舵机的当前角度（增量控制的“状态”）
+int currentX = 90;
+int currentY = 90;
+int currentZ = 90;
+int currentG = 90;
+
+//移动速度系数，越大越慢
+const int SPEED_DIV = 140;
+
+//延迟时长
+int DSD = 26;
+
+void updateJoystick();//摇杆控制
+void servoCmd(int x, int y, int z);//处理多个串口指令
+void moveServo(Servo &servoName, int fromPos, int toPos);//舵机运动
+void handleSingleCmd(char c);//处理单个转口指令
+void OpenClaw();//打开机械钳
+void CloseClaw();//合闭机械钳
+void DSDadd();//减慢运行速度
+void DSDsub();//加快运行速度
+void startRecord();//开始录制
+void stopRecord();//停止录制
+void playRecord();//播放
+void servoInit();//回中
+void printServoPos();//打印舵机状态
+bool isLegal(int x, int y, int z);//判断是否合法
+int getValue(String data, char key);//获取指令数据
 
 void setup()
 {
     base.attach(9,500,2500);
+    delay(500);
     lArm.attach(8,500,2500);
+    delay(500);
     rArm.attach(7,500,2500);
+    delay(500);
     claw.attach(6,500,2500);
+    delay(500);
 
-    servoInit();
+    servoInit();//回中
 
     Serial.begin(9600);
     Serial.println("Please Input Data: ");
@@ -59,18 +84,23 @@ void setup()
 
 void loop()
 {
+    //摇杆只有在播放模式下不能使用
     if(state != PLAYING) updateJoystick();
 
     if(Serial.available()>0)
     {
-        String serialCmd = Serial.readStringUntil('\n');
-        serialCmd.trim();
+        String serialCmd = Serial.readStringUntil('\n');//截取整行指令
+        serialCmd.trim();//删除空格、换行符
 
-        if(serialCmd.length() == 0) return;
+        if(serialCmd.length() == 0) return;//防误触
   
-        if(serialCmd.length() == 1) handleSingleCmd(serialCmd[0]);
+        if(serialCmd.length() == 1)//处理单指令
+        {
+            handleSingleCmd(serialCmd[0]);
+            return;//执行一次直接结束，避免后续二次执行。
+        }
         
-        if(state == IDLE&&(serialCmd.indexOf('x') != -1 || serialCmd.indexOf('y') || -1 && serialCmd.indexOf('z') || -1 ))
+        if(state == IDLE&&(serialCmd.indexOf('x') != -1 || serialCmd.indexOf('y') != -1 || -1 && serialCmd.indexOf('z') || -1 ))
         {
             //x,y,z分别对应base,lArm,rArm
             int x = (serialCmd.indexOf('x') != -1) ? getValue(serialCmd, 'x') : base.read();
@@ -84,29 +114,50 @@ void loop()
     }
 }
 
-void updateJoystick()
+void updateJoystick()//摇杆控制核心
 {
-    int x = map(analogRead(basePin),0,1023,0,180);
-    int y = map(analogRead(lARmPin),0,1023,0,180);
-    int z = map(analogRead(rArmPin),0,1023,0,180);
-    int g = map(analogRead(clawPin),0,1023,0,180);
+    //读取数据
+    int rawX = analogRead(basePin);
+    int rawY = analogRead(lArmPin);
+    int rawZ = analogRead(rArmPin);
+    int rawG = analogRead(clawPin);
 
-    x = constrain(x,baseMin,baseMax);
-    y = constrain(y,lArmMin,lArmMax);
-    z = constrain(z,rArmMin,rArmMax);
-    g = constrain(g,clawMin,clawMax);
+    int offsetX = rawX - JOY_CENTER;
+    int offsetY = rawY - JOY_CENTER;
+    int offsetZ = rawZ - JOY_CENTER;
+    int offsetG = rawG - JOY_CENTER;
 
-    base.write(x);
-    lArm.write(y);
-    rArm.write(z);
-    claw.write(g);
+    //死区过滤，防止摇杆微小位移而发生抖动，确定需要多大的幅度才能使机械臂移动
+    if(abs(offsetX)<JOY_DEADZONE) offsetX = 0;
+    if(abs(offsetY)<JOY_DEADZONE) offsetY = 0;
+    if(abs(offsetZ)<JOY_DEADZONE) offsetZ = 0;
+    if(abs(offsetG)<JOY_DEADZONE) offsetG = 0;
 
-    base.wriet(state == RECORDING && recordIndex < MAX_RECORD)
+    //累计增量
+    currentX += offsetX / SPEED_DIV;
+    currentY += offsetY / SPEED_DIV;
+    currentZ += offsetZ / SPEED_DIV;
+    currentG += offsetG / SPEED_DIV;
+
+    //限幅
+    currentX = constrain(currentX, baseMin, baseMax);
+    currentY = constrain(currentY, lArmMin, lArmMax);
+    currentZ = constrain(currentZ, rArmMin, rArmMax);
+    currentG = constrain(currentG, clawMin, clawMax);
+
+    //写入
+    base.write(currentX);
+    lArm.write(currentY);
+    rArm.write(currentZ);
+    claw.write(currentG);
+
+    //顺带录制
+    if(state == RECORDING && recordIndex < MAX_RECORD)
     {
-        baseRecord[recordIndex] = (byte)x;
-        lArmRecord[recordIndex] = (byte)y;
-        rArmRecord[recordIndex] = (byte)z;
-        clawRecord[recordIndex] = (byte)g;
+        baseRecord[recordIndex] = (byte)currentX;
+        lArmRecord[recordIndex] = (byte)currentY;
+        rArmRecord[recordIndex] = (byte)currentZ;
+        clawRecord[recordIndex] = (byte)currentG;
         recordIndex++;
     }
 
@@ -117,14 +168,19 @@ void servoCmd(int x, int y, int z)
 {
     Serial.print("Receive Command:x = ");
     Serial.print(x);
-    Serial.print("y = ");
+    Serial.print(" y = ");
     Serial.print(y);
-    Serial.print("z = ");
+    Serial.print(" z = ");
     Serial.println(z);
 
     moveServo(base, base.read(), x);
     moveServo(lArm, lArm.read(), y);
     moveServo(rArm, rArm.read(), z);
+
+    //只要涉及直接写入舵机的就要手动统一数据
+    currentX = x;
+    currentY = y;
+    currentZ = z;
 }
 
 void moveServo(Servo &servoName, int fromPos, int toPos)
@@ -168,16 +224,6 @@ bool isLegal(int x, int y, int z)
 
 void handleSingleCmd(char c)
 {
-    if(state == PLAYING)
-    {
-        if(c == 'I')
-        {
-            state = IDLE;
-            servoInit();
-        }
-        return;
-    }
-
     if(state == RECORDING)
     {
         if(c == 'R') stopRecord();
@@ -186,6 +232,11 @@ void handleSingleCmd(char c)
 
     switch(c)
     {
+        case '?':
+            Serial.println("----- Servo Position -----");
+            printServoPos();
+            Serial.println("--------------------------");
+            break;
         case 'I':
             servoInit();
             break;
@@ -207,6 +258,9 @@ void handleSingleCmd(char c)
         case 'P':
             playRecord();
             break;
+        case 'A':
+            pickA();
+            break;
         default:
             Serial.println("+Warning:unknown command!");
             break;
@@ -217,27 +271,27 @@ void startRecord()
 {
     state = RECORDING;
     recordIndex = 0;
-    Serial.println("开始录制...");
+    Serial.println("Start recording...");
 }
 
 void stopRecord()
 {
     state = IDLE;
-    Serial.print("录制结束，共 ");
+    Serial.print("End Recording, total ");
     Serial.print(recordIndex);
-    Serial.println(" 个数据点");
+    Serial.println(" data points.");
 }
 
 void playRecord()
 {
-    if(recordIndex = 0)
+    if(recordIndex == 0)
     {
         Serial.println("+Warning:No Recording Data!");
         return;
     }
 
     state = PLAYING;
-    Serial.println("Start Recording...");
+    Serial.println("Start Playing...");
 
     for(int i = 0;i<recordIndex;i++)
     {
@@ -249,28 +303,38 @@ void playRecord()
     }
 
     state = IDLE;
-    Serial.println("End Recording.");
+    Serial.println("End Playing...");
+
+    if (recordIndex > 0)
+    {
+        currentX = baseRecord[recordIndex - 1];
+        currentY = lArmRecord[recordIndex - 1];
+        currentZ = rArmRecord[recordIndex - 1];
+        currentG = clawRecord[recordIndex - 1];
+    }
 }
 
 void OpenClaw()
 {
-    moveServo(claw,claw.read(),clawMax);
+    moveServo(claw,claw.read(),clawMin);
+    currentG = clawMin;
 }
 
 void CloseClaw()
 {
-    moveServo(claw,claw.read(),clawMin);
+    moveServo(claw,claw.read(),clawMax);
+    currentG = clawMax;
 }
 
 void DSDsub()
 {
-    int cur = DSD - 3;
+    int cur = DSD - 5;
     if(cur > 0)
     {
         Serial.print("DSD:");
         Serial.print(DSD);
         Serial.print("->");
-        DSD -= 3;
+        DSD -= 5;
         Serial.println(DSD);
     } 
     else
@@ -282,13 +346,13 @@ void DSDsub()
 
 void DSDadd()
 {
-    int cur = DSD + 3;
-    if(cur < 26)
+    int cur = DSD + 5;
+    if(cur < 51)
     {
         Serial.print("DSD:");
         Serial.print(DSD);
         Serial.print("->");
-        DSD += 3;
+        DSD += 5;
         Serial.println(DSD);
     } 
     else
@@ -300,12 +364,52 @@ void DSDadd()
 
 void servoInit()
 {
-    base.write(89);
-    lArm.write(91);
-    rArm.write(91);
-    claw.write(clawMax);
+    servoCmd(90,90,90);
+    currentX = 90;
+    currentY = 90;
+    currentZ = 90;
 
-    delay(100);
+    delay(300);
+
+    moveServo(claw,claw.read(),90);
+    currentG = 90;
 }
 
+void printServoPos()
+{
+    Serial.print("base: read=");
+    Serial.print(base.read());
+    Serial.print(" current=");
+    Serial.print(currentX);
+
+    Serial.print("  lArm: read=");
+    Serial.print(lArm.read());
+    Serial.print(" current=");
+    Serial.print(currentY);
+
+    Serial.print("  rArm: read=");
+    Serial.print(rArm.read());
+    Serial.print(" current=");
+    Serial.print(currentZ);
+
+    Serial.print("  claw: read=");
+    Serial.print(claw.read());
+    Serial.print(" current=");
+    Serial.println(currentG);
+}
+
+void pickA()
+{
+    servoInit();
+    int steps[2][3]={
+        {0,180,0},
+        {180,45,180}
+    };
+    for(int i = 0;i<=2;i++)
+    {
+        moveServo(base,base.read(),steps[0][i]);
+        moveServo(lArm,lArm.read(),steps[1][i]);
+        delay(50);
+    }
+}
 ```
