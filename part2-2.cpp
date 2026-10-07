@@ -44,10 +44,10 @@ int currentZ = 90;
 int currentG = 90;
 
 //移动速度系数，越大越慢
-const int SPEED_DIV = 140;
+int SPEED_DIV = 150;
 
 //延迟时长
-int DSD = 26;
+int DSD = 15;
 
 void updateJoystick();//摇杆控制
 void servoCmd(int x, int y, int z);//处理多个串口指令
@@ -61,7 +61,7 @@ void startRecord();//开始录制
 void stopRecord();//停止录制
 void playRecord();//播放
 void servoInit();//回中
-void printServoPos();//打印舵机状态
+void printServoInf();//打印舵机状态
 bool isLegal(int x, int y, int z);//判断是否合法
 int getValue(String data, char key);//获取指令数据
 
@@ -100,17 +100,29 @@ void loop()
             return;//执行一次直接结束，避免后续二次执行。
         }
         
-        if(state == IDLE&&(serialCmd.indexOf('x') != -1 || serialCmd.indexOf('y') != -1 || -1 && serialCmd.indexOf('z') || -1 ))
+        if(state == IDLE &&(serialCmd.indexOf('x') != -1 || serialCmd.indexOf('y') != -1 || -1 && serialCmd.indexOf('z') || -1 || serialCmd.indexOf('g') != -1))
         {
-            //x,y,z分别对应base,lArm,rArm
+            //x,y,z,g分别对应base,lArm,rArm,claw
             int x = (serialCmd.indexOf('x') != -1) ? getValue(serialCmd, 'x') : base.read();
             int y = (serialCmd.indexOf('y') != -1) ? getValue(serialCmd, 'y') : lArm.read();
             int z = (serialCmd.indexOf('z') != -1) ? getValue(serialCmd, 'z') : rArm.read();
+            int g = (serialCmd.indexOf('g') != -1) ? getValue(serialCmd, 'g') : claw.read();
 
             if(isLegal(x, y, z)) servoCmd(x,y,z);
             else Serial.println("+Warning: Your Command is Out Of Limits!");
+
+            if(c >= clawMin && c <= clawMax)
+            {
+                moveServo(claw, claw.read(), g);
+                currentG = g;   // 同步状态，防止被摇杆拉回去
+                Serial.print("claw -> ");
+                Serial.println(g);
+            }
+            else
+            {
+                Serial.println("+Warning: Claw Angle Out Of Limits!");
+            }
         }
-        else Serial.println("+Warning: Unknown Command!");
     }
 }
 
@@ -152,13 +164,28 @@ void updateJoystick()//摇杆控制核心
     claw.write(currentG);
 
     //顺带录制
-    if(state == RECORDING && recordIndex < MAX_RECORD)
+    if(state == RECORDING)
     {
-        baseRecord[recordIndex] = (byte)currentX;
-        lArmRecord[recordIndex] = (byte)currentY;
-        rArmRecord[recordIndex] = (byte)currentZ;
-        clawRecord[recordIndex] = (byte)currentG;
-        recordIndex++;
+        if(recordIndex < MAX_RECORD)
+        {
+            baseRecord[recordIndex] = (byte)currentX;
+            lArmRecord[recordIndex] = (byte)currentY;
+            rArmRecord[recordIndex] = (byte)currentZ;
+            clawRecord[recordIndex] = (byte)currentG;
+            recordIndex++;
+
+            //距离一秒时提醒
+            if(recordIndex == MAX_RECORD - 20)
+            {
+                Serial.println("+Reminder: 20 data points left, recording will stop soon.");
+            }
+        }
+        else
+        {
+            //自动结束了录制
+            stopRecord();
+            Serial.println("+Warning: Record buffer full! Auto stopped.");
+        }
     }
 
     delay(50);
@@ -277,7 +304,7 @@ void startRecord()
 void stopRecord()
 {
     state = IDLE;
-    Serial.print("End Recording, total ");
+    Serial.print("End Recording, with a total of  ");
     Serial.print(recordIndex);
     Serial.println(" data points.");
 }
@@ -326,44 +353,47 @@ void CloseClaw()
     currentG = clawMax;
 }
 
-void DSDsub()
+void speedUp()
 {
-    int cur = DSD - 5;
-    if(cur > 0)
-    {
-        Serial.print("DSD:");
-        Serial.print(DSD);
-        Serial.print("->");
-        DSD -= 5;
-        Serial.println(DSD);
-    } 
-    else
-    {
-        Serial.print("+Warning:too fast! your current speed is:");
-        Serial.println(DSD);
-    }
+    if(SPEED_DIV > 40) SPEED_DIV -= 20;
+    if(DSD > 4) DSD -= 2;
+
+    Serial.print("Speed UP: SPEED_DIV=");
+    Serial.print(SPEED_DIV);
+    Serial.print(", DSD=");
+    Serial.println(DSD);
 }
 
-void DSDadd()
+void speedDown()
 {
-    int cur = DSD + 5;
-    if(cur < 51)
+    
+    if(SPEED_DIV < 300) SPEED_DIV += 20;
+    else 
     {
-        Serial.print("DSD:");
-        Serial.print(DSD);
-        Serial.print("->");
-        DSD += 5;
-        Serial.println(DSD);
-    } 
+        Serial.print("+Warning: Too Slow! SPEED_DIV = ");
+        Serial.println(SPEED_DIV);
+        return;
+    }
+
+    if(DSD < 40) DSD += 2;
     else
     {
-        Serial.print("+Warning:too slow! your current speed is:");
-        Serial.println(DSD);
+        Serial.print("+Warning: Too Slow! DSD = ");
+        Serial.println(SPEED_DIV);
+        return;
     }
+
+    Serial.print("Speed DOWN: SPEED_DIV=");
+    Serial.print(SPEED_DIV);
+    Serial.print(", DSD=");
+    Serial.println(DSD);
 }
 
 void servoInit()
 {
+    SPEED_DIV = 150;
+    DSD = 15;
+
     servoCmd(90,90,90);
     currentX = 90;
     currentY = 90;
@@ -375,7 +405,7 @@ void servoInit()
     currentG = 90;
 }
 
-void printServoPos()
+void printServoInf()
 {
     Serial.print("base: read=");
     Serial.print(base.read());
@@ -395,7 +425,12 @@ void printServoPos()
     Serial.print("  claw: read=");
     Serial.print(claw.read());
     Serial.print(" current=");
-    Serial.println(currentG);
+    Serial.print(currentG);
+
+    Serial.print(" SPEED_DIC: ")
+    Serial.print(SPEED_DIV);
+    Serial.print(" DSD: ")
+    Serial.println(DSD);
 }
 
 void pickA()
