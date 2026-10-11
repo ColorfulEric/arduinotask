@@ -1,4 +1,4 @@
-```cpp
+
 #include<Servo.h>
 
 Servo claw, base, lArm, rArm;//创建对象
@@ -7,11 +7,11 @@ Servo claw, base, lArm, rArm;//创建对象
 const int baseMin = 0;
 const int baseMax = 180; 
 const int rArmMin = 90;
-const int rArmMax = 160; 
-const int lArmMin = 35;
-const int lArmMax = 120;
+const int rArmMax = 180; 
+const int lArmMin = 0;
+const int lArmMax = 90;
 const int clawMin = 0;
-const int clawMax = 100;
+const int clawMax = 120;
 
 //初始化引脚
 const int basePin = A0;
@@ -20,7 +20,7 @@ const int rArmPin = A2;
 const int clawPin = A3;
 
 //限制最大录制时长
-const int MAX_RECORD = 200;
+const int MAX_RECORD = 150;
 byte baseRecord[MAX_RECORD];
 byte lArmRecord[MAX_RECORD];
 byte rArmRecord[MAX_RECORD];
@@ -111,7 +111,7 @@ void loop()
             if(isLegal(x, y, z)) servoCmd(x,y,z);
             else Serial.println("+Warning: Your Command is Out Of Limits!");
 
-            if(c >= clawMin && c <= clawMax)
+            if(g >= clawMin && g <= clawMax)
             {
                 moveServo(claw, claw.read(), g);
                 currentG = g;   // 同步状态，防止被摇杆拉回去
@@ -146,9 +146,9 @@ void updateJoystick()//摇杆控制核心
     if(abs(offsetG)<JOY_DEADZONE) offsetG = 0;
 
     //累计增量
-    currentX += offsetX / SPEED_DIV;
-    currentY += offsetY / SPEED_DIV;
-    currentZ += offsetZ / SPEED_DIV;
+    currentX -= offsetX / SPEED_DIV;
+    currentY -= offsetY / SPEED_DIV;
+    currentZ -= offsetZ / SPEED_DIV;
     currentG += offsetG / SPEED_DIV;
 
     //限幅
@@ -261,7 +261,7 @@ void handleSingleCmd(char c)
     {
         case '?':
             Serial.println("----- Servo Position -----");
-            printServoPos();
+            printServoInf();
             Serial.println("--------------------------");
             break;
         case 'I':
@@ -391,12 +391,9 @@ void speedDown()
 
 void servoInit()
 {
-    SPEED_DIV = 150;
-    DSD = 15;
-
-    servoCmd(90,90,90);
+    servoCmd(90,60,90);
     currentX = 90;
-    currentY = 90;
+    currentY = 60;
     currentZ = 90;
 
     delay(300);
@@ -427,24 +424,79 @@ void printServoInf()
     Serial.print(" current=");
     Serial.print(currentG);
 
-    Serial.print(" SPEED_DIC: ")
+    Serial.print(" SPEED_DIC: ");
     Serial.print(SPEED_DIV);
-    Serial.print(" DSD: ")
+    Serial.print(" DSD: ");
     Serial.println(DSD);
 }
-
-void pickA()
+//101
+void pickA()//铅笔
 {
     servoInit();
-    int steps[2][3]={
-        {0,180,0},
-        {180,45,180}
-    };
-    for(int i = 0;i<=2;i++)
-    {
-        moveServo(base,base.read(),steps[0][i]);
-        moveServo(lArm,lArm.read(),steps[1][i]);
-        delay(50);
-    }
+    moveServo(claw,claw.read(),45);
+    currentG = 45;
+    moveServo(lArm,lArm.read(),90);
+    currentY = 90;
+    moveServo(claw,claw.read(),100);
+    currentG = 100;
+    moveServo(lArm,lArm.read(),35);
+    currentY = 35;
+    moveServo(rArm,rArm.read(),109);
+    currentZ = 109;
+    moveServo(base,base.read(),180);
+    currentX = 180;
+    moveServo(rArm,rArm.read(),90);
+    currentZ = 90;
+    moveServo(lArm,lArm.read(),60);
+    currentY = 60;
+    moveServo(claw,claw.read(),45);
+    currentG = 45;
+    servoInit();
 }
-```
+
+void pickB()//硬币
+{
+    servoInit();
+    moveServo(claw,claw.read(),45);
+    currentG = 45;
+    moveServo(lArm,lArm.read(),45);
+    currentY = 45;
+    moveServo(rArm,rArm.read(),109);
+    currentZ = 109;
+    delay(1000);
+    moveServo(claw,claw.read(),103);
+    currentG = 103;
+    delay(1000);
+    moveServo(base,base.read(),180);
+    currentX = 180;
+    moveServo(lArm,lArm.read(),60);
+    currentY = 60;
+    moveServo(rArm,rArm.read(),90);
+    currentZ = 90;
+    moveServo(claw,claw.read(),45);
+    currentG = 45;
+    servoInit();
+}
+
+void pickC()//不规则物体
+{
+    servoInit();
+    moveServo(claw,claw.read(),45);
+    currentG = 45;
+    moveServo(rArm,rArm.read(),109);
+    currentZ = 109;
+    delay(1000);
+    moveServo(claw,claw.read(),101);
+    currentG = 101;
+    moveServo(rArm,rArm.read(),90);
+    currentZ = 90;
+    moveServo(base,base.read(),180);
+    currentX = 180;
+    moveServo(lArm,lArm.read(),30);
+    currentY = 45;
+    moveServo(rArm,rArm.read(),109);
+    currentZ = 109;
+    moveServo(claw,claw.read(),45);
+    currentG = 45;
+    servoInit();
+}
