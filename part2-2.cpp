@@ -298,6 +298,14 @@ void handleSingleCmd(char c)
         case 'A':
             pickA();
             break;
+        case '1':
+            Serial.println("Drawing line...");
+            drawLine(100, 0, 100, 100, DRAW_Z, 20);
+            break;
+        case '2':
+            Serial.println("Drawing triangle...");
+            drawTriangle();
+            break;
         default:
             Serial.println("+Warning:unknown command!");
             break;
@@ -513,7 +521,7 @@ void pickC()//不规则物体
 //======== 逆运动学 ========
 bool inverseKinematics(float x,float y,float z,int &sBase,int &sLArm,int &sRArm)
 {
-    float = theta1 = atan2(y,x);
+    float theta1 = atan2(y,x);
     float r = sqrt(x * x + y * y);
 
     float D = (r * r + z * z - L1 * L1 - L2 * L2)/(2.0 * L1 * L2);
