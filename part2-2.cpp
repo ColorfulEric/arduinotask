@@ -10,7 +10,7 @@ const int rArmMin = 90;
 const int rArmMax = 180; 
 const int lArmMin = 0;
 const int lArmMax = 90;
-const int clawMin = 0;
+const int clawMin = 0;q
 const int clawMax = 120;
 
 //初始化引脚
@@ -27,8 +27,16 @@ byte rArmRecord[MAX_RECORD];
 byte clawRecord[MAX_RECORD];
 int recordIndex = 0;
 
-//限制系统状态：空闲、录制、播放
-enum State {IDLE,RECORDING,PLAYING};
+// ===== 逆运动学参数 =====
+const float L1 = 80.0;           // 大臂长度，用尺子量，单位 mm
+const float L2 = 80.0;           // 小臂长度
+const float BASE_OFFSET = 90.0;  // 底座偏移，需要标定
+const float LARM_OFFSET = 90.0;   // 大臂偏移
+const float RARM_OFFSET = 90.0;   // 小臂偏移
+const float DRAW_Z = 0.0;        // 画图时末端高度
+
+//限制系统状态：空闲、录制、播放、绘画
+enum State {IDLE,RECORDING,PLAYING,DRAWING};
 //初始化状态
 State state = IDLE;
 
@@ -65,6 +73,8 @@ void printServoInf();//打印舵机状态
 bool isLegal(int x, int y, int z);//判断是否合法
 int getValue(String data, char key);//获取指令数据
 
+
+
 void setup()
 {
     base.attach(9,500,2500);
@@ -85,7 +95,7 @@ void setup()
 void loop()
 {
     //摇杆只有在播放模式下不能使用
-    if(state != PLAYING) updateJoystick();
+    if(state != PLAYING && state != DRAWING) updateJoystick();
 
     if(Serial.available()>0)
     {
@@ -499,4 +509,75 @@ void pickC()//不规则物体
     moveServo(claw,claw.read(),45);
     currentG = 45;
     servoInit();
+}
+//======== 逆运动学 ========
+bool inverseKinematics(float x,float y,float z,int &sBase,int &sLArm,int &sRArm)
+{
+    float = theta1 = atan2(y,x);
+    float r = sqrt(x * x + y * y);
+
+    float D = (r * r + z * z - L1 * L1 - L2 * L2)/(2.0 * L1 * L2);
+    if(D < -1.0 || D > 1.0) return false;
+
+    sBase = (int)(degrees(theta1) + BASE_OFFSET);
+    sLArm = (int)(degrees(theta2) + LARM_OFFSET);
+    sRArm = (int)(degrees(theta3) + RARM_OFFSET);
+
+    if(sBase < baseMin || sBase > baseMax) return false;
+    if(sLArm < lArmMin || sLArm > lArmMax) return false;
+    if(sRArm < rArmMin || sRArm > rArmMax) return false;
+
+    return true;
+}
+
+//======= 平移到目标点 =======
+bool moveTo(float x,float y,float z)
+{
+    int sBase,sLArm,sRArm;
+    if(!inverseKinematics(x,y,z,sBase,sLArm,sRArm))
+    {
+        Serial.println("+Warning: Position out of reach!");
+        return false;
+    }
+
+    int fromBase = base.read();
+    int fromLArm = lArm.read();
+    int fromRArm = rArm.read();
+
+    int steps = 5;//控制流畅度，steps越大越流畅
+    for(int i = 0;i <= steeps;i++)
+    {
+        base.write(fromBase + (sBase - fromBase) * i / steps);
+        lArm.write(fromLArm + (sLArm - fromLArm) * i / steps);
+        rArm.write(fromRArm + (sRArm - fromRArm) * i / steps);
+        delay(10); 
+    }
+
+    //同步遥感，防拉回
+    currentX = sBase;
+    currentY = sLArm;
+    currentZ = sRArm;
+    return true;
+}
+
+//======== 画直线 ========
+void drawLine(float x1,float y1,float x2,float y2,float z,int steps)
+{
+    state = DRAWING;
+    for(int i = 0;i <= steps;i++)
+    {
+        float t = (float)i / steps;
+        float x = x1 + (x2 - x1) * t;
+        float y = y1 + (y2 - y1) * t;
+        moveTo(x,y,z);
+    }
+    state = IDLE;
+}
+
+//======== 画三角形 ========
+void drawTriangle()
+{
+    drawLine(100,0,50,80,DRAW_Z,20);
+    drawLine(50,80,0,0,DRAW_Z,20);
+    drawLine(0,0,100,0,DARW_Z,20);
 }
