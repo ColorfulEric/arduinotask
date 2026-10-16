@@ -276,7 +276,7 @@ bool isLegal(int x, int y, int z)
 //处理单字符指令
 void handleSingleCmd(char c)
 {
-    if(state == RECORDIN)
+    if(state == RECORDING)
     {
         if(c == 'R') stopRecord();
         return;
@@ -314,7 +314,7 @@ void handleSingleCmd(char c)
             pickA();
             break;
         case 'B':
-            pickA();
+            pickB();
             break;
         case 'C':
             pickC();
