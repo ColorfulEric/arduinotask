@@ -10,7 +10,7 @@ const int rArmMin = 90;
 const int rArmMax = 180; 
 const int lArmMin = 0;
 const int lArmMax = 90;
-const int clawMin = 0;q
+const int clawMin = 0;
 const int clawMax = 120;
 
 //初始化引脚
@@ -20,7 +20,7 @@ const int rArmPin = A2;
 const int clawPin = A3;
 
 //限制最大录制时长
-const int MAX_RECORD = 150;
+const int MAX_RECORD = 300;
 byte baseRecord[MAX_RECORD];
 byte lArmRecord[MAX_RECORD];
 byte rArmRecord[MAX_RECORD];
@@ -77,6 +77,7 @@ int getValue(String data, char key);//获取指令数据
 
 void setup()
 {
+    //初始化舵机
     base.attach(9,500,2500);
     delay(500);
     lArm.attach(8,500,2500);
@@ -94,9 +95,10 @@ void setup()
 
 void loop()
 {
-    //摇杆只有在播放模式下不能使用
+    //摇杆只有在播放模式下不能使用（和绘制模式）
     if(state != PLAYING && state != DRAWING) updateJoystick();
 
+    //检测是否有串口数据，并处理
     if(Serial.available()>0)
     {
         String serialCmd = Serial.readStringUntil('\n');//截取整行指令
@@ -110,17 +112,21 @@ void loop()
             return;//执行一次直接结束，避免后续二次执行。
         }
         
-        if(state == IDLE &&(serialCmd.indexOf('x') != -1 || serialCmd.indexOf('y') != -1 || -1 && serialCmd.indexOf('z') || -1 || serialCmd.indexOf('g') != -1))
+        //串口控制，支持混合指令
+        if(state == IDLE &&(serialCmd.indexOf('x') != -1 || serialCmd.indexOf('y') != -1 || serialCmd.indexOf('z') != -1 || serialCmd.indexOf('g') != -1))
         {
             //x,y,z,g分别对应base,lArm,rArm,claw
+            //三元运算
             int x = (serialCmd.indexOf('x') != -1) ? getValue(serialCmd, 'x') : base.read();
             int y = (serialCmd.indexOf('y') != -1) ? getValue(serialCmd, 'y') : lArm.read();
             int z = (serialCmd.indexOf('z') != -1) ? getValue(serialCmd, 'z') : rArm.read();
             int g = (serialCmd.indexOf('g') != -1) ? getValue(serialCmd, 'g') : claw.read();
 
+            //检测指令是否合法
             if(isLegal(x, y, z)) servoCmd(x,y,z);
             else Serial.println("+Warning: Your Command is Out Of Limits!");
 
+            //单独判断claw指令
             if(g >= clawMin && g <= clawMax)
             {
                 moveServo(claw, claw.read(), g);
@@ -144,6 +150,7 @@ void updateJoystick()//摇杆控制核心
     int rawZ = analogRead(rArmPin);
     int rawG = analogRead(clawPin);
 
+    //减去半值（中心值为512）
     int offsetX = rawX - JOY_CENTER;
     int offsetY = rawY - JOY_CENTER;
     int offsetZ = rawZ - JOY_CENTER;
@@ -155,7 +162,7 @@ void updateJoystick()//摇杆控制核心
     if(abs(offsetZ)<JOY_DEADZONE) offsetZ = 0;
     if(abs(offsetG)<JOY_DEADZONE) offsetG = 0;
 
-    //累计增量
+    //累计变量
     currentX -= offsetX / SPEED_DIV;
     currentY -= offsetY / SPEED_DIV;
     currentZ -= offsetZ / SPEED_DIV;
@@ -176,6 +183,7 @@ void updateJoystick()//摇杆控制核心
     //顺带录制
     if(state == RECORDING)
     {
+        //写入录制数组中
         if(recordIndex < MAX_RECORD)
         {
             baseRecord[recordIndex] = (byte)currentX;
@@ -198,9 +206,11 @@ void updateJoystick()//摇杆控制核心
         }
     }
 
-    delay(50);
+    //80帧每秒记录一次数据，刚好过10s
+    delay(80);
 }
 
+//处理串口指令
 void servoCmd(int x, int y, int z)
 {
     Serial.print("Receive Command:x = ");
@@ -220,6 +230,8 @@ void servoCmd(int x, int y, int z)
     currentZ = z;
 }
 
+
+//舵机移动函数
 void moveServo(Servo &servoName, int fromPos, int toPos)
 {
     if(fromPos>toPos)
@@ -240,17 +252,19 @@ void moveServo(Servo &servoName, int fromPos, int toPos)
     }
 }
 
+//获取数值
 int getValue(String data, char key)
-{
+{G
     int index = data.indexOf(key);
     if(index == -1) return -1;
 
-    int end = data.indexOf(',',index);
-    if(end == -1) end = data.length();
+    int end = data.indexOf(',',index);//x45，y45
+    if(end == -1) end = data.length();//针对单舵机指令
 
     return data.substring(index + 1, end).toInt();
 }
 
+//判断指令是否合法
 bool isLegal(int x, int y, int z)
 {
     if(x < baseMin || x > baseMax) return false;
@@ -259,9 +273,10 @@ bool isLegal(int x, int y, int z)
     return true;
 }
 
+//处理单字符指令
 void handleSingleCmd(char c)
 {
-    if(state == RECORDING)
+    if(state == RECORDIN)
     {
         if(c == 'R') stopRecord();
         return;
@@ -284,10 +299,10 @@ void handleSingleCmd(char c)
             CloseClaw();
             break;
         case 'H':
-            DSDsub();
+            speedUp();
             break;
         case 'L':
-            DSDadd();
+            speedDown();
             break;
         case 'R':
             startRecord();
@@ -298,20 +313,27 @@ void handleSingleCmd(char c)
         case 'A':
             pickA();
             break;
-        case '1':
+        case 'B':
+            pickA();
+            break;
+        case 'C':
+            pickC();
+            break;
+        /*case '1':
             Serial.println("Drawing line...");
             drawLine(100, 0, 100, 100, DRAW_Z, 20);
             break;
         case '2':
             Serial.println("Drawing triangle...");
             drawTriangle();
-            break;
+            break;*/
         default:
             Serial.println("+Warning:unknown command!");
             break;
     }
 }
 
+//录制
 void startRecord()
 {
     state = RECORDING;
@@ -319,6 +341,7 @@ void startRecord()
     Serial.println("Start recording...");
 }
 
+//停止
 void stopRecord()
 {
     state = IDLE;
@@ -327,29 +350,36 @@ void stopRecord()
     Serial.println(" data points.");
 }
 
+//播放
 void playRecord()
 {
+
+    //特殊情况，防止误触
     if(recordIndex == 0)
     {
         Serial.println("+Warning:No Recording Data!");
         return;
     }
 
+    //模式转变
     state = PLAYING;
     Serial.println("Start Playing...");
 
+    //读取数据点
     for(int i = 0;i<recordIndex;i++)
     {
         base.write(baseRecord[i]);
         lArm.write(lArmRecord[i]);
         rArm.write(rArmRecord[i]);
         claw.write(clawRecord[i]);
-        delay(50);
+        delay(80);//必须和写入数据的延迟一样，否则会少读数据点
     }
 
+    //换回来
     state = IDLE;
     Serial.println("End Playing...");
 
+    //让虚拟量与实际量相等，放拉回
     if (recordIndex > 0)
     {
         currentX = baseRecord[recordIndex - 1];
@@ -359,18 +389,21 @@ void playRecord()
     }
 }
 
+//打开钳子
 void OpenClaw()
 {
     moveServo(claw,claw.read(),clawMin);
     currentG = clawMin;
 }
 
+//关上钳子
 void CloseClaw()
 {
     moveServo(claw,claw.read(),clawMax);
     currentG = clawMax;
 }
 
+//加速
 void speedUp()
 {
     if(SPEED_DIV > 40) SPEED_DIV -= 20;
@@ -382,6 +415,7 @@ void speedUp()
     Serial.println(DSD);
 }
 
+//减速
 void speedDown()
 {
     
@@ -407,6 +441,7 @@ void speedDown()
     Serial.println(DSD);
 }
 
+//回中（初始化）
 void servoInit()
 {
     servoCmd(90,60,90);
@@ -420,11 +455,12 @@ void servoInit()
     currentG = 90;
 }
 
+//打印信息
 void printServoInf()
 {
     Serial.print("base: read=");
     Serial.print(base.read());
-    Serial.print(" current=");
+    Serial.print("  current=");
     Serial.print(currentX);
 
     Serial.print("  lArm: read=");
@@ -442,91 +478,109 @@ void printServoInf()
     Serial.print(" current=");
     Serial.print(currentG);
 
-    Serial.print(" SPEED_DIC: ");
+    Serial.print("  SPEED_DIC: ");
     Serial.print(SPEED_DIV);
-    Serial.print(" DSD: ");
+    Serial.print("  DSD: ");
     Serial.println(DSD);
 }
-//101
+
 void pickA()//铅笔
 {
     servoInit();
     moveServo(claw,claw.read(),45);
     currentG = 45;
-    moveServo(lArm,lArm.read(),90);
-    currentY = 90;
+    delay(1000);
+    moveServo(rArm,rArm.read(),130);
+    currentZ = 130;
+    delay(1000);
+    moveServo(claw,claw.read(),97);
+    currentG = 97;
+    delay(1000);
+    moveServo(rArm,rArm.read(),90);
+    currentZ = 90;
+    delay(1000);
+    moveServo(base,base.read(),0);
+    currentX = 0;
+    delay(1000);
+    moveServo(lArm,lArm.read(),18);
+    currentY = 18;
+    delay(1000);
+    moveServo(claw,claw.read(),45);
+    currentG = 45;
+    delay(1000);
+    servoInit();
+    delay(1000);
+}
+
+void pickB()//coin
+{
+    servoInit();
+    moveServo(claw,claw.read(),50);
+    currentG = 50;
+    delay(1000);
+    moveServo(rArm,rArm.read(),130);
+    currentZ = 130;
+    delay(1000);
+    moveServo(claw,claw.read(),107);
+    currentG = 107;
+    delay(1000);
+    moveServo(rArm,rArm.read(),90);
+    currentZ = 90;
+    delay(1000);
+    moveServo(base,base.read(),180);
+    currentX = 180;
+    delay(1000);
+    moveServo(lArm,lArm.read(),18);
+    currentY = 18;
+    delay(1000);
+    moveServo(claw,claw.read(),50);
+    currentG = 50;
+    delay(1000);
+    servoInit();
+    delay(1000);
+}
+
+void pickC()//不规则物体(钥匙)
+{
+    servoInit();
+    delay(1000);
+    moveServo(claw,claw.read(),45);
+    currentG = 45;
+    delay(1000);
+    moveServo(lArm,lArm.read(),70);
+    currentY = 70;
+    delay(1000);
+    moveServo(rArm,rArm.read(),130);
+    currentZ = 130;
+    delay(1000);
     moveServo(claw,claw.read(),100);
     currentG = 100;
-    moveServo(lArm,lArm.read(),35);
-    currentY = 35;
-    moveServo(rArm,rArm.read(),109);
-    currentZ = 109;
-    moveServo(base,base.read(),180);
-    currentX = 180;
+    delay(1000);
     moveServo(rArm,rArm.read(),90);
     currentZ = 90;
-    moveServo(lArm,lArm.read(),60);
-    currentY = 60;
-    moveServo(claw,claw.read(),45);
-    currentG = 45;
-    servoInit();
-}
-
-void pickB()//硬币
-{
-    servoInit();
-    moveServo(claw,claw.read(),45);
-    currentG = 45;
-    moveServo(lArm,lArm.read(),45);
-    currentY = 45;
-    moveServo(rArm,rArm.read(),109);
-    currentZ = 109;
     delay(1000);
-    moveServo(claw,claw.read(),103);
-    currentG = 103;
+    moveServo(lArm,lArm.read(),40);
+    currentY = 40;
     delay(1000);
-    moveServo(base,base.read(),180);
-    currentX = 180;
-    moveServo(lArm,lArm.read(),60);
-    currentY = 60;
-    moveServo(rArm,rArm.read(),90);
-    currentZ = 90;
-    moveServo(claw,claw.read(),45);
-    currentG = 45;
-    servoInit();
-}
-
-void pickC()//不规则物体
-{
-    servoInit();
-    moveServo(claw,claw.read(),45);
-    currentG = 45;
-    moveServo(rArm,rArm.read(),109);
-    currentZ = 109;
+    moveServo(rArm,rArm.read(),130);
+    currentZ = 130;
     delay(1000);
-    moveServo(claw,claw.read(),101);
-    currentG = 101;
-    moveServo(rArm,rArm.read(),90);
-    currentZ = 90;
-    moveServo(base,base.read(),180);
-    currentX = 180;
-    moveServo(lArm,lArm.read(),30);
-    currentY = 45;
-    moveServo(rArm,rArm.read(),109);
-    currentZ = 109;
     moveServo(claw,claw.read(),45);
     currentG = 45;
+    delay(1000);
     servoInit();
 }
 //======== 逆运动学 ========
-bool inverseKinematics(float x,float y,float z,int &sBase,int &sLArm,int &sRArm)
+/*bool inverseKinematics(float x,float y,float z,int &sBase,int &sLArm,int &sRArm)
 {
     float theta1 = atan2(y,x);
     float r = sqrt(x * x + y * y);
+    if(r < 20.0) return false;
 
     float D = (r * r + z * z - L1 * L1 - L2 * L2)/(2.0 * L1 * L2);
     if(D < -1.0 || D > 1.0) return false;
 
+    //舵机实际需要到达的角度
     sBase = (int)(degrees(theta1) + BASE_OFFSET);
     sLArm = (int)(degrees(theta2) + LARM_OFFSET);
     sRArm = (int)(degrees(theta3) + RARM_OFFSET);
@@ -588,4 +642,4 @@ void drawTriangle()
     drawLine(100,0,50,80,DRAW_Z,20);
     drawLine(50,80,0,0,DRAW_Z,20);
     drawLine(0,0,100,0,DARW_Z,20);
-}
+}*/
